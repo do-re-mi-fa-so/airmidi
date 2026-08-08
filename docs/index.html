@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>airmidi — BLE-MIDI for the browser</title>
+<meta name="description" content="Connect to BLE-MIDI devices directly from the browser via Web Bluetooth. Live demo and code samples for the airmidi library." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%8E%B9</text></svg>" />
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fb;
+    --bg-elevated: #ffffff;
+    --text: #14151a;
+    --text-dim: #5b5f6b;
+    --border: #e2e4ea;
+    --accent: #0284c7;
+    --accent-strong: #0369a1;
+    --accent-soft: #e0f2fe;
+    --remote: #d946ef;
+    --remote-soft: #fae8ff;
+    --danger: #dc2626;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+    --key-white: #ffffff;
+    --key-black: #1c1f26;
+    --shadow: 0 1px 2px rgba(20, 21, 26, 0.05), 0 8px 24px -12px rgba(20, 21, 26, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0d12;
+      --bg-elevated: #14171f;
+      --text: #eef0f4;
+      --text-dim: #9aa0ae;
+      --border: #262a35;
+      --accent: #38bdf8;
+      --accent-strong: #7dd3fc;
+      --accent-soft: #0c2b3a;
+      --remote: #e879f9;
+      --remote-soft: #3b1240;
+      --danger: #f87171;
+      --code-bg: #060709;
+      --code-text: #d7dce6;
+      --key-white: #e7e9ee;
+      --key-black: #08090c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+  a { color: var(--accent-strong); }
+
+  .hero {
+    padding: 72px 0 40px;
+    text-align: center;
+  }
+  .hero .eyebrow {
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .hero h1 {
+    font-size: clamp(2.2rem, 5vw, 3.2rem);
+    margin: 10px 0 12px;
+    letter-spacing: -0.02em;
+  }
+  .hero p.tagline {
+    color: var(--text-dim);
+    font-size: 1.1rem;
+    max-width: 46ch;
+    margin: 0 auto 28px;
+  }
+  .hero-links {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 10px;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #04202b;
+  }
+  .btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .btn.ghost { background: transparent; }
+
+  section {
+    padding: 56px 0;
+    border-top: 1px solid var(--border);
+  }
+  section .eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    font-weight: 700;
+  }
+  section h2 {
+    margin: 6px 0 12px;
+    font-size: 1.6rem;
+    letter-spacing: -0.01em;
+  }
+  section > p.lead {
+    color: var(--text-dim);
+    max-width: 62ch;
+    margin: 0 0 24px;
+  }
+
+  .card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: var(--shadow);
+  }
+  .card + .card { margin-top: 20px; }
+
+  pre.code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 12px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin: 0;
+  }
+  pre.code code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .code-label {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    margin: 20px 0 8px;
+  }
+  .code-label:first-child { margin-top: 0; }
+
+  /* Connect */
+  #support-warning {
+    display: none;
+    background: var(--remote-soft);
+    color: var(--remote);
+    border: 1px solid var(--remote);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 0.9rem;
+    margin-bottom: 20px;
+  }
+  .connect-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--text-dim);
+  }
+  .status-pill::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .status-pill[data-state="connecting"] { color: #b45309; background: #fef3c7; }
+  .status-pill[data-state="connected"] { color: #15803d; background: #dcfce7; }
+  @media (prefers-color-scheme: dark) {
+    .status-pill[data-state="connecting"] { color: #fbbf24; background: #3f2d05; }
+    .status-pill[data-state="connected"] { color: #4ade80; background: #06280f; }
+  }
+  #device-name { color: var(--text-dim); font-size: 0.9rem; }
+
+  /* Piano */
+  .legend {
+    display: flex;
+    gap: 20px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .swatch.local { background: var(--accent); }
+  .swatch.remote { background: var(--remote); }
+
+  .piano {
+    position: relative;
+    height: 160px;
+    display: flex;
+    user-select: none;
+    touch-action: none;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .key {
+    position: relative;
+    box-sizing: border-box;
+    transition: background-color 0.08s ease, transform 0.08s ease;
+    cursor: pointer;
+  }
+  .key.white {
+    height: 100%;
+    background: var(--key-white);
+    border-right: 1px solid var(--border);
+    border-bottom: 4px solid var(--border);
+  }
+  .key.black {
+    position: absolute;
+    top: 0;
+    height: 62%;
+    background: var(--key-black);
+    border-radius: 0 0 4px 4px;
+    z-index: 2;
+    box-shadow: 0 3px 4px rgba(0, 0, 0, 0.35);
+  }
+  .key.white.pressed-local { background: var(--accent-soft); border-bottom-color: var(--accent); }
+  .key.black.pressed-local { background: var(--accent); }
+  .key.pressed-local { transform: translateY(2px); }
+  .key.white.pressed-remote {
+    background: color-mix(in srgb, var(--remote-soft) calc(var(--velocity, 0.6) * 100%), var(--key-white));
+    border-bottom-color: var(--remote);
+  }
+  .key.black.pressed-remote {
+    background: color-mix(in srgb, var(--remote) calc(var(--velocity, 0.6) * 100%), var(--key-black));
+  }
+
+  /* Log */
+  .log {
+    max-height: 280px;
+    overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--code-bg);
+    color: var(--code-text);
+  }
+  .log:empty::after {
+    content: "Waiting for MIDI messages… play the keyboard above once connected.";
+    display: block;
+    padding: 16px;
+    color: var(--text-dim);
+    font-family: -apple-system, sans-serif;
+  }
+  .log-row {
+    display: grid;
+    grid-template-columns: 72px 128px 1fr auto;
+    gap: 12px;
+    padding: 7px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    align-items: baseline;
+  }
+  .log-row--error { color: var(--danger); grid-template-columns: 1fr; }
+  .log-time { color: #64748b; }
+  .log-label { color: var(--accent-strong); font-weight: 600; }
+  .log-detail { color: var(--code-text); }
+  .log-hex { color: #64748b; text-align: right; white-space: nowrap; }
+
+  /* Playground */
+  .playground-tool + .playground-tool { margin-top: 24px; }
+  .playground-tool label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .playground-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .playground-row input[type="text"] {
+    flex: 1;
+    min-width: 220px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9rem;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .playground-output {
+    margin-top: 10px;
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    min-height: 1.6em;
+  }
+
+  footer {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    padding: 40px 0 0;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="hero">
+      <div class="eyebrow">BLE-MIDI over Web Bluetooth</div>
+      <h1>airmidi</h1>
+      <p class="tagline">Connect to BLE-MIDI devices directly from the browser — no OS-level pairing, no native app. Talks the MIDI GATT service straight over Web Bluetooth.</p>
+      <div class="hero-links">
+        <a class="btn primary" href="#connect">Try the demo</a>
+        <a class="btn ghost" href="https://github.com/do-re-mi-fa-so/airmidi">GitHub</a>
+        <a class="btn ghost" href="https://www.npmjs.com/package/airmidi">npm install airmidi</a>
+      </div>
+    </header>
+
+    <section id="connect">
+      <div class="eyebrow">01 · Connect</div>
+      <h2>Pair with a BLE-MIDI device</h2>
+      <p class="lead">Opens the browser's native Bluetooth device picker, scoped to BLE-MIDI peripherals, and connects straight to the MIDI I/O characteristic. Requires a device already in pairing/advertising mode.</p>
+
+      <div class="card">
+        <div id="support-warning">
+          Your browser doesn't support Web Bluetooth. Try Chrome, Edge, Opera, or Android — Safari and Firefox aren't supported.
+        </div>
+        <div class="connect-row">
+          <button class="btn primary" id="connect-btn">Connect via Bluetooth</button>
+          <button class="btn ghost" id="disconnect-btn" hidden>Disconnect</button>
+          <span class="status-pill" id="status-pill" data-state="idle">Not connected</span>
+          <span id="device-name"></span>
+        </div>
+
+        <div class="code-label">Connect</div>
+        <pre class="code"><code>import { connectBleMidi } from "airmidi";
+
+const connection = await connectBleMidi();
+console.log("connected to", connection.deviceName);</code></pre>
+
+        <div class="code-label">Disconnect</div>
+        <pre class="code"><code>connection.addEventListener("disconnected", () => {
+  console.log("device disconnected");
+});
+
+connection.disconnect();</code></pre>
+      </div>
+    </section>
+
+    <section id="keyboard">
+      <div class="eyebrow">02 · Send &amp; receive</div>
+      <h2>Play the keyboard</h2>
+      <p class="lead">Click a key to send a Note On / Note Off to your connected device. Notes played <em>on</em> the device (or by anything else routed to it) light up here too.</p>
+
+      <div class="card">
+        <div class="legend">
+          <span><i class="swatch local"></i> You played (sent)</span>
+          <span><i class="swatch remote"></i> Received</span>
+        </div>
+        <div class="piano" id="piano"></div>
+
+        <div class="code-label">Receiving</div>
+        <pre class="code"><code>connection.addEventListener("midimessage", (event) => {
+  const { data, timestamp } = event.detail;
+  console.log(Array.from(data), timestamp);
+});</code></pre>
+
+        <div class="code-label">Sending</div>
+        <pre class="code"><code>// Note On — channel 1, middle C (60), velocity 100
+await connection.send({ data: [0x90, 60, 100] });
+
+// Note Off
+await connection.send({ data: [0x80, 60, 0] });</code></pre>
+      </div>
+    </section>
+
+    <section id="log">
+      <div class="eyebrow">03 · Every message type</div>
+      <h2>Message log</h2>
+      <p class="lead">All decoded MIDI messages — notes, control changes, pitch bend, program changes, SysEx, real-time — as they arrive, including ones the piano above doesn't visualize.</p>
+
+      <div class="card">
+        <div class="log" id="log"></div>
+
+        <div class="code-label">Telling messages apart</div>
+        <pre class="code"><code>function describe([status, d1, d2]) {
+  const type = status & 0xf0;
+  const channel = (status & 0x0f) + 1;
+
+  if (type === 0x90 && d2 > 0) return `Note On ${d1} vel ${d2} ch${channel}`;
+  if (type === 0x80 || (type === 0x90 && d2 === 0)) return `Note Off ${d1} ch${channel}`;
+  if (type === 0xb0) return `CC${d1} = ${d2} ch${channel}`;
+  if (type === 0xe0) return `Pitch Bend ${(d2 << 7 | d1) - 8192} ch${channel}`;
+  if (status === 0xf0) return "SysEx";
+  if (status >= 0xf8) return "Real-Time";
+}</code></pre>
+      </div>
+    </section>
+
+    <section id="playground">
+      <div class="eyebrow">04 · Low-level API</div>
+      <h2>Parser &amp; encoder playground</h2>
+      <p class="lead">No device needed — this runs the same <code>BleMidiParser</code> and <code>encodeBleMidiPackets</code> that power the connection above, decoding raw BLE-MIDI packet bytes (header + timestamp framing, running status, SysEx) and encoding MIDI messages back into packets.</p>
+
+      <div class="card">
+        <div class="playground-tool">
+          <div class="code-label">Decode: BLE-MIDI packet bytes → MIDI messages</div>
+          <div class="playground-row">
+            <input type="text" id="decode-input" value="80 8D 90 3C 40" />
+            <button class="btn" id="decode-btn">Decode</button>
+          </div>
+          <div class="playground-output" id="decode-output"></div>
+          <pre class="code"><code>import { BleMidiParser } from "airmidi";
+
+const parser = new BleMidiParser();
+const messages = parser.parsePacket(
+  Uint8Array.of(0x80, 0x8d, 0x90, 0x3c, 0x40)
+);
+// [{ data: Uint8Array[0x90, 0x3c, 0x40], timestamp: 13 }]</code></pre>
+        </div>
+
+        <div class="playground-tool">
+          <div class="code-label">Encode: MIDI message → BLE-MIDI packet bytes</div>
+          <div class="playground-row">
+            <input type="text" id="encode-input" value="90 3C 64" />
+            <button class="btn" id="encode-btn">Encode</button>
+          </div>
+          <div class="playground-output" id="encode-output"></div>
+          <pre class="code"><code>import { encodeBleMidiPackets } from "airmidi";
+
+const packets = encodeBleMidiPackets([
+  { data: [0x90, 0x3c, 0x64] },
+]);
+// [Uint8Array[0x80, ts, 0x90, 0x3c, 0x64]]</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      MIT licensed · <a href="https://github.com/do-re-mi-fa-so/airmidi">Source on GitHub</a> · <a href="https://www.npmjs.com/package/airmidi">airmidi on npm</a>
+    </footer>
+
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

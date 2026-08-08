@@ -4,6 +4,8 @@ Connect to BLE-MIDI peripherals directly from the browser via the [Web Bluetooth
 
 This is a different approach from wrapping [`navigator.requestMIDIAccess()`](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/requestMIDIAccess) (what [`webmidi`](https://webmidijs.org/) does): it talks to the [BLE-MIDI GATT service](https://midi.org/specifications/midi-transports-specifications/bluetooth-le-midi) directly, so it works anywhere Web Bluetooth is supported, even on platforms where the Web MIDI API doesn't surface BLE devices.
 
+**[Live demo →](https://do-re-mi-fa-so.github.io/airmidi/)** — connect to a real device, play a virtual keyboard, and try the parser/encoder without any hardware.
+
 ## Browser support
 
 Requires [Web Bluetooth](https://caniuse.com/web-bluetooth) — Chrome, Edge, Opera, and Android WebView. Not supported in Safari or Firefox.
@@ -58,6 +60,12 @@ npm install
 npm test        # vitest
 npm run build   # tsup -> dist/
 npm run typecheck
+```
+
+`docs/` is the source for the GitHub Pages demo (served from `/docs` on `main`). It vendors a copy of the built library — after changing `src/`, regenerate it with:
+
+```sh
+npm run build:docs   # builds the library, then copies dist/index.js to docs/airmidi.js
 ```
 
 ## License
