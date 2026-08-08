@@ -8,3 +8,10 @@ export const BLE_MIDI_DATA_IO_CHARACTERISTIC_UUID =
 
 /** Conservative default when the GATT MTU can't be determined. */
 export const DEFAULT_MAX_PACKET_SIZE = 20;
+
+/**
+ * Some platforms silently hang during GATT connect (stale pairing, a
+ * peripheral already connected elsewhere) instead of rejecting. Give up
+ * after this long rather than leaving callers waiting forever.
+ */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 15000;

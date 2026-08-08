@@ -215,6 +215,16 @@
     .status-pill[data-state="connected"] { color: #4ade80; background: #06280f; }
   }
   #device-name { color: var(--text-dim); font-size: 0.9rem; }
+  .wide-scan-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin: 10px 0 4px;
+    cursor: pointer;
+  }
+  .wide-scan-toggle input { margin: 0; }
 
   /* Piano */
   .legend {
@@ -226,9 +236,64 @@
     flex-wrap: wrap;
   }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .audio-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; cursor: pointer; }
+  .audio-toggle input { margin: 0; }
   .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
   .swatch.local { background: var(--accent); }
   .swatch.remote { background: var(--remote); }
+
+  .harmony {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 22px 16px 18px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg);
+  }
+  .harmony__name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 2.1rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--accent-strong);
+    transition: color 0.15s ease, font-size 0.15s ease;
+    word-break: break-word;
+  }
+  .harmony__name.dim { color: var(--text-dim); font-size: 1.5rem; font-weight: 600; }
+  .harmony__sub {
+    margin-top: 6px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .harmony__notes {
+    margin-top: 12px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+    min-height: 26px;
+  }
+  .harmony__notes span {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--accent);
+    color: var(--accent-strong);
+    background: var(--accent-soft);
+  }
+  .piano-hint {
+    margin: 10px 2px 0;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
+  }
 
   .piano {
     position: relative;
@@ -274,7 +339,7 @@
 
   /* Log */
   .log {
-    max-height: 280px;
+    max-height: 110px;
     overflow-y: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.82rem;
@@ -299,6 +364,8 @@
     align-items: baseline;
   }
   .log-row--error { color: var(--danger); grid-template-columns: 1fr; }
+  .log-row[data-dir="sent"] { border-left: 3px solid var(--accent); }
+  .log-row[data-dir="recv"] { border-left: 3px solid var(--remote); }
   .log-time { color: #64748b; }
   .log-label { color: var(--accent-strong); font-weight: 600; }
   .log-detail { color: var(--code-text); }
@@ -378,12 +445,20 @@
           <span class="status-pill" id="status-pill" data-state="idle">Not connected</span>
           <span id="device-name"></span>
         </div>
+        <label class="wide-scan-toggle">
+          <input type="checkbox" id="wide-scan-toggle" />
+          Wide scan — show every nearby device (some peripherals never advertise the MIDI service)
+        </label>
 
         <div class="code-label">Connect</div>
         <pre class="code"><code>import { connectBleMidi } from "airmidi";
 
 const connection = await connectBleMidi();
-console.log("connected to", connection.deviceName);</code></pre>
+console.log("connected to", connection.deviceName);
+
+// If your device doesn't show up in the picker, it may not advertise the
+// MIDI service UUID. Widen the scan to list every nearby device instead:
+await connectBleMidi({ wideScan: true });</code></pre>
 
         <div class="code-label">Disconnect</div>
         <pre class="code"><code>connection.addEventListener("disconnected", () => {
@@ -403,8 +478,23 @@ connection.disconnect();</code></pre>
         <div class="legend">
           <span><i class="swatch local"></i> You played (sent)</span>
           <span><i class="swatch remote"></i> Received</span>
+          <label class="audio-toggle">
+            <input type="checkbox" id="audio-toggle" checked />
+            Sound
+          </label>
         </div>
+
+        <div class="harmony">
+          <div class="harmony__name dim" id="harmony-name">—</div>
+          <div class="harmony__sub" id="harmony-sub">no notes held</div>
+          <div class="harmony__notes" id="harmony-notes"></div>
+        </div>
+
         <div class="piano" id="piano"></div>
+        <p class="piano-hint">Drag across the keys to slide between notes — like a real glissando.</p>
+
+        <div class="code-label">Message log</div>
+        <div class="log" id="log"></div>
 
         <div class="code-label">Receiving</div>
         <pre class="code"><code>connection.addEventListener("midimessage", (event) => {
@@ -421,31 +511,8 @@ await connection.send({ data: [0x80, 60, 0] });</code></pre>
       </div>
     </section>
 
-    <section id="log">
-      <div class="eyebrow">03 · Every message type</div>
-      <h2>Message log</h2>
-      <p class="lead">All decoded MIDI messages — notes, control changes, pitch bend, program changes, SysEx, real-time — as they arrive, including ones the piano above doesn't visualize.</p>
-
-      <div class="card">
-        <div class="log" id="log"></div>
-
-        <div class="code-label">Telling messages apart</div>
-        <pre class="code"><code>function describe([status, d1, d2]) {
-  const type = status & 0xf0;
-  const channel = (status & 0x0f) + 1;
-
-  if (type === 0x90 && d2 > 0) return `Note On ${d1} vel ${d2} ch${channel}`;
-  if (type === 0x80 || (type === 0x90 && d2 === 0)) return `Note Off ${d1} ch${channel}`;
-  if (type === 0xb0) return `CC${d1} = ${d2} ch${channel}`;
-  if (type === 0xe0) return `Pitch Bend ${(d2 << 7 | d1) - 8192} ch${channel}`;
-  if (status === 0xf0) return "SysEx";
-  if (status >= 0xf8) return "Real-Time";
-}</code></pre>
-      </div>
-    </section>
-
     <section id="playground">
-      <div class="eyebrow">04 · Low-level API</div>
+      <div class="eyebrow">03 · Low-level API</div>
       <h2>Parser &amp; encoder playground</h2>
       <p class="lead">No device needed — this runs the same <code>BleMidiParser</code> and <code>encodeBleMidiPackets</code> that power the connection above, decoding raw BLE-MIDI packet bytes (header + timestamp framing, running status, SysEx) and encoding MIDI messages back into packets.</p>
 

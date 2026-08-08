@@ -3,6 +3,7 @@
 var BLE_MIDI_SERVICE_UUID = "03b80e5a-ede8-4b33-a751-6ce34ec4c700";
 var BLE_MIDI_DATA_IO_CHARACTERISTIC_UUID = "7772e5db-3868-4112-a1a9-f2669d106bf3";
 var DEFAULT_MAX_PACKET_SIZE = 20;
+var DEFAULT_CONNECT_TIMEOUT_MS = 15e3;
 
 // src/encoder.ts
 function timestampParts(timestampMs) {
@@ -192,6 +193,12 @@ async function requestBleMidiDevice(options = {}) {
   if (!navigator.bluetooth) {
     throw new Error("Web Bluetooth is not available in this browser.");
   }
+  if (options.wideScan) {
+    return navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [BLE_MIDI_SERVICE_UUID]
+    });
+  }
   return navigator.bluetooth.requestDevice({
     filters: options.filters?.length ? options.filters : [{ services: [BLE_MIDI_SERVICE_UUID] }],
     optionalServices: [BLE_MIDI_SERVICE_UUID]
@@ -204,6 +211,11 @@ var BleMidiConnection = class _BleMidiConnection extends EventTarget {
     this.characteristic = characteristic;
     this.maxPacketSize = maxPacketSize;
     this.parser = new BleMidiParser();
+    // GATT tolerates no overlap: firing writeValueWithoutResponse concurrently
+    // (e.g. two keys pressed in quick succession) floods the peripheral's write
+    // queue and can wedge the link into a disconnect. Chain writes so each
+    // waits for the previous one to settle.
+    this.writeChain = Promise.resolve();
     this.onNotify = (event) => {
       const characteristic = event.target;
       const value = characteristic.value;
@@ -216,17 +228,40 @@ var BleMidiConnection = class _BleMidiConnection extends EventTarget {
       this.dispatchEvent(new Event("disconnected"));
     });
   }
-  static async connect(device, maxPacketSize = DEFAULT_MAX_PACKET_SIZE) {
+  static async connect(device, options = {}) {
+    const {
+      maxPacketSize = DEFAULT_MAX_PACKET_SIZE,
+      timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS
+    } = options;
     if (!device.gatt) throw new Error("Device does not expose a GATT server.");
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(BLE_MIDI_SERVICE_UUID);
-    const characteristic = await service.getCharacteristic(
-      BLE_MIDI_DATA_IO_CHARACTERISTIC_UUID
-    );
-    const connection = new _BleMidiConnection(device, characteristic, maxPacketSize);
-    await characteristic.startNotifications();
-    characteristic.addEventListener("characteristicvaluechanged", connection.onNotify);
-    return connection;
+    const attempt = (async () => {
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(BLE_MIDI_SERVICE_UUID);
+      const characteristic = await service.getCharacteristic(
+        BLE_MIDI_DATA_IO_CHARACTERISTIC_UUID
+      );
+      const connection = new _BleMidiConnection(device, characteristic, maxPacketSize);
+      await characteristic.startNotifications();
+      characteristic.addEventListener("characteristicvaluechanged", connection.onNotify);
+      return connection;
+    })();
+    if (!timeoutMs) return attempt;
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        device.gatt?.disconnect();
+        reject(
+          new Error(
+            `Timed out connecting to ${device.name ?? "device"} (no response after ${timeoutMs}ms). It may already be connected elsewhere, or stuck pairing at the OS level.`
+          )
+        );
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([attempt, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   get deviceName() {
     return this.device.name ?? void 0;
@@ -238,9 +273,14 @@ var BleMidiConnection = class _BleMidiConnection extends EventTarget {
   async send(messages) {
     const list = Array.isArray(messages) ? messages : [messages];
     const packets = encodeBleMidiPackets(list, this.maxPacketSize);
-    for (const packet of packets) {
-      await this.characteristic.writeValueWithoutResponse(packet);
-    }
+    const chain = this.writeChain.then(async () => {
+      for (const packet of packets) {
+        await this.characteristic.writeValueWithoutResponse(packet);
+      }
+    });
+    this.writeChain = chain.catch(() => {
+    });
+    return chain;
   }
   disconnect() {
     this.characteristic.removeEventListener("characteristicvaluechanged", this.onNotify);
@@ -250,7 +290,7 @@ var BleMidiConnection = class _BleMidiConnection extends EventTarget {
 };
 async function connectBleMidi(options = {}) {
   const device = await requestBleMidiDevice(options);
-  return BleMidiConnection.connect(device);
+  return BleMidiConnection.connect(device, options);
 }
 export {
   BLE_MIDI_DATA_IO_CHARACTERISTIC_UUID,

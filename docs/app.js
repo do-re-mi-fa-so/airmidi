@@ -1,4 +1,4 @@
-import { connectBleMidi, BleMidiParser, encodeBleMidiPackets } from "./airmidi.js";
+import { BleMidiParser, connectBleMidi, encodeBleMidiPackets } from "./airmidi.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -7,6 +7,7 @@ const disconnectBtn = $("#disconnect-btn");
 const statusPill = $("#status-pill");
 const deviceNameEl = $("#device-name");
 const supportWarning = $("#support-warning");
+const wideScanToggle = $("#wide-scan-toggle");
 const logEl = $("#log");
 
 const MAX_LOG_ROWS = 60;
@@ -27,7 +28,7 @@ connectBtn.addEventListener("click", async () => {
   setStatus("connecting", "Connecting…");
   connectBtn.disabled = true;
   try {
-    connection = await connectBleMidi();
+    connection = await connectBleMidi({ wideScan: wideScanToggle.checked });
     onConnected();
   } catch (err) {
     setStatus("idle", "Not connected");
@@ -52,16 +53,63 @@ function onConnected() {
   });
 
   connection.addEventListener("disconnected", () => {
+    connection = null;
     setStatus("idle", "Not connected");
     connectBtn.hidden = false;
     disconnectBtn.hidden = true;
     deviceNameEl.textContent = "";
+    // A dropped link can strand notes "on" with no note-off ever arriving.
+    clearAllNotes();
   });
 }
 
 // ---------------------------------------------------------------------------
 // Piano
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Sound — the demo has no MIDI output device, so keys are audited locally
+// with a small WebAudio synth. Fires for both notes you click and notes
+// received from the connected device.
+// ---------------------------------------------------------------------------
+
+const audioToggle = $("#audio-toggle");
+let audioCtx = null;
+const activeVoices = new Map();
+
+function noteToFrequency(note) {
+  return 440 * Math.pow(2, (note - 69) / 12);
+}
+
+function playNote(note, velocity) {
+  if (!audioToggle.checked) return;
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") void audioCtx.resume();
+
+  stopNote(note);
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = noteToFrequency(note);
+  const peak = Math.max(0.05, Math.min(0.3, (velocity / 127) * 0.3));
+  const now = audioCtx.currentTime;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(peak, now + 0.015);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(now);
+  activeVoices.set(note, { osc, gain });
+}
+
+function stopNote(note) {
+  const voice = activeVoices.get(note);
+  if (!voice) return;
+  activeVoices.delete(note);
+  const now = audioCtx.currentTime;
+  voice.gain.gain.cancelScheduledValues(now);
+  voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+  voice.gain.gain.linearRampToValueAtTime(0, now + 0.05);
+  voice.osc.stop(now + 0.06);
+}
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const WHITE_SEMITONES = new Set([0, 2, 4, 5, 7, 9, 11]);
@@ -74,6 +122,63 @@ const locallyPressed = new Set();
 
 function noteLabel(note) {
   return `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
+}
+
+// ---------------------------------------------------------------------------
+// Harmony readout — every note currently sounding, local or remote, named as
+// a chord. [intervals relative to root, quality suffix]
+// ---------------------------------------------------------------------------
+
+const CHORDS = [
+  [[0, 4, 7], ""], [[0, 3, 7], "m"], [[0, 3, 6], "dim"], [[0, 4, 8], "aug"],
+  [[0, 5, 7], "sus4"], [[0, 2, 7], "sus2"], [[0, 7], "5"], [[0, 4], "(no5)"], [[0, 3], "m(no5)"],
+  [[0, 4, 7, 11], "maj7"], [[0, 4, 7, 10], "7"], [[0, 3, 7, 10], "m7"], [[0, 3, 7, 11], "mMaj7"],
+  [[0, 3, 6, 10], "m7♭5"], [[0, 3, 6, 9], "dim7"], [[0, 4, 7, 9], "6"], [[0, 3, 7, 9], "m6"],
+  [[0, 2, 4, 7], "add9"], [[0, 4, 7, 10, 2], "9"], [[0, 4, 7, 11, 2], "maj9"], [[0, 3, 7, 10, 2], "m9"],
+];
+const chordKey = (intervals) => [...new Set(intervals)].sort((a, b) => a - b).join(",");
+const CHORD_MAP = new Map(CHORDS.map(([intervals, quality]) => [chordKey(intervals), quality]));
+
+function detectChord(notes) {
+  if (!notes.length) return null;
+  const bass = Math.min(...notes) % 12;
+  const pitchClasses = [...new Set(notes.map((n) => n % 12))].sort((a, b) => a - b);
+  if (pitchClasses.length === 1) return { label: NOTE_NAMES[pitchClasses[0]], sub: "single note" };
+
+  let best = null;
+  for (const root of pitchClasses) {
+    const intervals = chordKey(pitchClasses.map((p) => (p - root + 12) % 12));
+    const quality = CHORD_MAP.get(intervals);
+    if (quality === undefined) continue;
+    const score = (root === bass ? 100 : 0) + (60 - intervals.length);
+    if (!best || score > best.score) best = { score, root, quality };
+  }
+
+  if (!best) {
+    return {
+      label: pitchClasses.map((p) => NOTE_NAMES[p]).join(" "),
+      sub: `${pitchClasses.length}-note cluster`,
+    };
+  }
+  const slash = best.root !== bass ? `/${NOTE_NAMES[bass]}` : "";
+  return {
+    label: `${NOTE_NAMES[best.root]}${best.quality}${slash}`,
+    sub: `${notes.length} voice${notes.length > 1 ? "s" : ""} · root ${NOTE_NAMES[best.root]}`,
+  };
+}
+
+const heldNotes = new Set();
+const harmonyNameEl = $("#harmony-name");
+const harmonySubEl = $("#harmony-sub");
+const harmonyNotesEl = $("#harmony-notes");
+
+function updateHarmony() {
+  const notes = [...heldNotes].sort((a, b) => a - b);
+  const chord = detectChord(notes);
+  harmonyNameEl.textContent = chord ? chord.label : "—";
+  harmonyNameEl.classList.toggle("dim", !chord);
+  harmonySubEl.textContent = chord ? chord.sub : "no notes held";
+  harmonyNotesEl.innerHTML = notes.map((n) => `<span>${noteLabel(n)}</span>`).join("");
 }
 
 function buildPiano() {
@@ -89,9 +194,9 @@ function buildPiano() {
     key.className = "key white";
     key.style.width = `${whiteWidth}%`;
     key.title = noteLabel(note);
+    key.dataset.note = String(note);
     pianoEl.appendChild(key);
     keyElements.set(note, key);
-    bindKeyEvents(key, note);
   }
 
   for (const note of blackNotes) {
@@ -102,30 +207,84 @@ function buildPiano() {
     key.style.width = `${width}%`;
     key.style.left = `${(leftWhiteIndex + 1) * whiteWidth - width / 2}%`;
     key.title = noteLabel(note);
+    key.dataset.note = String(note);
     pianoEl.appendChild(key);
     keyElements.set(note, key);
-    bindKeyEvents(key, note);
   }
 }
 
-function bindKeyEvents(key, note) {
-  const press = (ev) => {
-    ev.preventDefault();
-    if (locallyPressed.has(note)) return;
-    locallyPressed.add(note);
-    key.classList.add("pressed-local");
-    void connection?.send({ data: [0x90, note, 100] });
-  };
-  const release = () => {
-    if (!locallyPressed.has(note)) return;
-    locallyPressed.delete(note);
-    key.classList.remove("pressed-local");
-    void connection?.send({ data: [0x80, note, 0] });
-  };
-  key.addEventListener("pointerdown", press);
-  key.addEventListener("pointerup", release);
-  key.addEventListener("pointerleave", release);
+// ---------------------------------------------------------------------------
+// Pointer handling — each pointer (mouse, or a finger on touch) tracks the
+// one key it's currently over, so dragging across the keybed slides from
+// note to note (a glissando) instead of only triggering the key first touched.
+// Pointer capture keeps move events coming even once the finger/cursor
+// leaves the piano's bounds; elementFromPoint re-hit-tests on every move.
+// ---------------------------------------------------------------------------
+
+const pointerNotes = new Map(); // pointerId -> note currently held by that pointer
+
+function noteAtPoint(x, y) {
+  const key = document.elementFromPoint(x, y)?.closest(".key");
+  return key ? Number(key.dataset.note) : null;
 }
+
+function pressNote(note) {
+  if (locallyPressed.has(note)) return;
+  locallyPressed.add(note);
+  keyElements.get(note)?.classList.add("pressed-local");
+  heldNotes.add(note);
+  updateHarmony();
+  playNote(note, 100);
+  const data = [0x90, note, 100];
+  if (connection) {
+    logSentMessage(data);
+    connection.send({ data }).catch(logError);
+  }
+}
+
+function releaseNote(note) {
+  if (!locallyPressed.has(note)) return;
+  locallyPressed.delete(note);
+  keyElements.get(note)?.classList.remove("pressed-local");
+  heldNotes.delete(note);
+  updateHarmony();
+  stopNote(note);
+  const data = [0x80, note, 0];
+  if (connection) {
+    logSentMessage(data);
+    connection.send({ data }).catch(logError);
+  }
+}
+
+function slideTo(pointerId, note) {
+  const prev = pointerNotes.get(pointerId) ?? null;
+  if (note === prev) return;
+  if (prev !== null) releaseNote(prev);
+  pointerNotes.set(pointerId, note);
+  if (note !== null) pressNote(note);
+}
+
+function endPointer(ev) {
+  if (!pointerNotes.has(ev.pointerId)) return;
+  slideTo(ev.pointerId, null);
+  pointerNotes.delete(ev.pointerId);
+}
+
+pianoEl.addEventListener("pointerdown", (ev) => {
+  ev.preventDefault();
+  try {
+    pianoEl.setPointerCapture(ev.pointerId);
+  } catch {
+    // Some environments (older Safari, synthetic test input) reject capture —
+    // sliding across keys just won't track once the pointer leaves the piano.
+  }
+  slideTo(ev.pointerId, noteAtPoint(ev.clientX, ev.clientY));
+});
+pianoEl.addEventListener("pointermove", (ev) => {
+  if (pointerNotes.has(ev.pointerId)) slideTo(ev.pointerId, noteAtPoint(ev.clientX, ev.clientY));
+});
+pianoEl.addEventListener("pointerup", endPointer);
+pianoEl.addEventListener("pointercancel", endPointer);
 
 buildPiano();
 
@@ -135,10 +294,27 @@ function flashKey(note, isOn, velocity) {
   if (isOn) {
     key.classList.add("pressed-remote");
     key.style.setProperty("--velocity", Math.max(0.35, velocity / 127));
+    heldNotes.add(note);
+    playNote(note, velocity);
   } else {
     key.classList.remove("pressed-remote");
     key.style.removeProperty("--velocity");
+    heldNotes.delete(note);
+    stopNote(note);
   }
+  updateHarmony();
+}
+
+function clearAllNotes() {
+  for (const note of keyElements.keys()) {
+    keyElements.get(note).classList.remove("pressed-local", "pressed-remote");
+    keyElements.get(note).style.removeProperty("--velocity");
+    stopNote(note);
+  }
+  pointerNotes.clear();
+  locallyPressed.clear();
+  heldNotes.clear();
+  updateHarmony();
 }
 
 // ---------------------------------------------------------------------------
@@ -185,17 +361,22 @@ function toHex(bytes) {
 
 function handleIncomingMessage(message) {
   const decoded = describeMessage(message.data);
-  appendLogRow(message, decoded);
+  appendLogRow(message.data, decoded, "recv", `${message.timestamp}ms`);
   if (decoded.note !== undefined) {
     flashKey(decoded.note, decoded.isNoteOn, decoded.velocity ?? 0);
   }
 }
 
-function appendLogRow(message, decoded) {
+function logSentMessage(data) {
+  appendLogRow(data, describeMessage(data), "sent", "sent");
+}
+
+function appendLogRow(data, decoded, direction, timeText) {
   const row = document.createElement("div");
   row.className = "log-row";
+  row.dataset.dir = direction;
   const channelPart = decoded.channel ? ` · ch${decoded.channel}` : "";
-  row.innerHTML = `<span class="log-time">${message.timestamp}ms</span><span class="log-label">${decoded.label}</span><span class="log-detail">${decoded.detail}${channelPart}</span><span class="log-hex">${toHex(message.data)}</span>`;
+  row.innerHTML = `<span class="log-time">${timeText}</span><span class="log-label">${decoded.label}</span><span class="log-detail">${decoded.detail}${channelPart}</span><span class="log-hex">${toHex(data)}</span>`;
   logEl.prepend(row);
   while (logEl.children.length > MAX_LOG_ROWS) logEl.lastChild.remove();
 }

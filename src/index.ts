@@ -5,7 +5,7 @@ export {
   connectBleMidi,
   requestBleMidiDevice,
 } from "./device";
-export type { RequestDeviceOptions } from "./device";
+export type { ConnectOptions, RequestDeviceOptions } from "./device";
 export { encodeBleMidiPackets } from "./encoder";
 export type { EncodableMessage } from "./encoder";
 export { BleMidiParser } from "./parser";
