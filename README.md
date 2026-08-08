@@ -1,10 +1,10 @@
 # airmidi
 
-Connect to BLE-MIDI peripherals directly from the browser via the [Web Bluetooth API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API) — no OS-level MIDI pairing required.
+Connect to BLE-MIDI peripherals directly from the browser via the [Web Bluetooth API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API) — no OS-level MIDI pairing required. The connection is bi-directional over a single GATT characteristic: send messages to the peripheral and receive messages from it (notes played on the device itself, or by anything else routed to it) on the same `connection`.
 
 This is a different approach from wrapping [`navigator.requestMIDIAccess()`](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/requestMIDIAccess) (what [`webmidi`](https://webmidijs.org/) does): it talks to the [BLE-MIDI GATT service](https://midi.org/specifications/midi-transports-specifications/bluetooth-le-midi) directly, so it works anywhere Web Bluetooth is supported, even on platforms where the Web MIDI API doesn't surface BLE devices.
 
-**[Live demo →](https://do-re-mi-fa-so.github.io/airmidi/)** — connect to a real device, play a virtual keyboard, and try the parser/encoder without any hardware.
+**[Live demo →](https://do-re-mi-fa-so.github.io/airmidi/)** — connect to a real device and play a virtual keyboard that sends and receives: notes you click are sent to the device, and notes played on the device light the same keys back up. Also try the parser/encoder without any hardware.
 
 ## Browser support
 
@@ -25,6 +25,8 @@ import { connectBleMidi } from "airmidi";
 // and connects to the MIDI I/O characteristic.
 const connection = await connectBleMidi();
 
+// Receive — fires for messages coming from the peripheral (notes played on
+// the device itself, or by anything else routed to it).
 connection.addEventListener("midimessage", (event) => {
   const { data, timestamp } = event.detail;
   console.log("received", Array.from(data), "at", timestamp);
@@ -34,7 +36,8 @@ connection.addEventListener("disconnected", () => {
   console.log(`${connection.deviceName} disconnected`);
 });
 
-// Send a Note On (channel 0, note 60, velocity 100).
+// Send — same connection, same characteristic, the other direction.
+// Note On (channel 0, note 60, velocity 100).
 await connection.send({ data: [0x90, 0x3c, 0x64] });
 
 connection.disconnect();
