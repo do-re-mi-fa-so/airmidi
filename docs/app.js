@@ -9,6 +9,7 @@ const deviceNameEl = $("#device-name");
 const supportWarning = $("#support-warning");
 const wideScanToggle = $("#wide-scan-toggle");
 const logEl = $("#log");
+const encodeSendBtn = $("#encode-send-btn");
 
 const MAX_LOG_ROWS = 60;
 
@@ -39,7 +40,15 @@ connectBtn.addEventListener("click", async () => {
 });
 
 disconnectBtn.addEventListener("click", () => {
-  connection?.disconnect();
+  connection?.forget();
+});
+
+// Best-effort: don't leave the device connected (and remembered) if the tab
+// closes without the user hitting Disconnect. There's no guarantee this
+// completes before the page is gone, but browsers give unload handlers a
+// brief window and GATT disconnects happen from the OS side regardless.
+window.addEventListener("pagehide", () => {
+  connection?.forget();
 });
 
 function onConnected() {
@@ -47,6 +56,8 @@ function onConnected() {
   deviceNameEl.textContent = connection.deviceName ?? "Unnamed device";
   connectBtn.hidden = true;
   disconnectBtn.hidden = false;
+  encodeSendBtn.disabled = false;
+  encodeSendBtn.title = "";
 
   connection.addEventListener("midimessage", (event) => {
     handleIncomingMessage(event.detail);
@@ -58,6 +69,8 @@ function onConnected() {
     connectBtn.hidden = false;
     disconnectBtn.hidden = true;
     deviceNameEl.textContent = "";
+    encodeSendBtn.disabled = true;
+    encodeSendBtn.title = "Connect a device above to send";
     // A dropped link can strand notes "on" with no note-off ever arriving.
     clearAllNotes();
   });
@@ -290,15 +303,14 @@ buildPiano();
 
 function flashKey(note, isOn, velocity) {
   const key = keyElements.get(note);
-  if (!key) return;
   if (isOn) {
-    key.classList.add("pressed-remote");
-    key.style.setProperty("--velocity", Math.max(0.35, velocity / 127));
+    key?.classList.add("pressed-remote");
+    key?.style.setProperty("--velocity", Math.max(0.35, velocity / 127));
     heldNotes.add(note);
     playNote(note, velocity);
   } else {
-    key.classList.remove("pressed-remote");
-    key.style.removeProperty("--velocity");
+    key?.classList.remove("pressed-remote");
+    key?.style.removeProperty("--velocity");
     heldNotes.delete(note);
     stopNote(note);
   }
@@ -309,8 +321,8 @@ function clearAllNotes() {
   for (const note of keyElements.keys()) {
     keyElements.get(note).classList.remove("pressed-local", "pressed-remote");
     keyElements.get(note).style.removeProperty("--velocity");
-    stopNote(note);
   }
+  for (const note of heldNotes) stopNote(note);
   pointerNotes.clear();
   locallyPressed.clear();
   heldNotes.clear();
@@ -429,4 +441,42 @@ $("#encode-btn").addEventListener("click", () => {
   } catch (err) {
     output.textContent = `Error: ${err.message}`;
   }
+});
+
+encodeSendBtn.addEventListener("click", () => {
+  if (!connection) return;
+  try {
+    const bytes = parseHexList($("#encode-input").value);
+    logSentMessage(bytes);
+    connection.send({ data: bytes }).catch(logError);
+  } catch (err) {
+    $("#encode-output").textContent = `Error: ${err.message}`;
+  }
+});
+
+// Note On/Off buttons are a friendlier front end for the hex input above —
+// picking a note + velocity writes the raw MIDI bytes into it and encodes,
+// so you don't need to know that C4 is 0x3C to try this out.
+const encodeNoteSelect = $("#encode-note");
+for (let note = 21; note <= 108; note++) {
+  const option = document.createElement("option");
+  option.value = String(note);
+  option.textContent = `${noteLabel(note)} (${note})`;
+  encodeNoteSelect.appendChild(option);
+}
+encodeNoteSelect.value = "60";
+
+function encodeNoteMessage(status, velocity) {
+  const note = Number(encodeNoteSelect.value);
+  $("#encode-input").value = toHex([status, note, velocity]).toUpperCase();
+  $("#encode-btn").click();
+}
+
+$("#encode-note-on-btn").addEventListener("click", () => {
+  const velocity = Math.max(0, Math.min(127, Number($("#encode-velocity").value) || 0));
+  encodeNoteMessage(0x90, velocity);
+});
+
+$("#encode-note-off-btn").addEventListener("click", () => {
+  encodeNoteMessage(0x80, 0);
 });

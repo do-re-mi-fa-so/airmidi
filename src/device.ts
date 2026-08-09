@@ -168,6 +168,22 @@ export class BleMidiConnection extends EventTarget {
     this.parser.reset();
     this.device.gatt?.disconnect();
   }
+
+  /**
+   * Disconnects and revokes the browser's remembered permission for this
+   * device, so it won't reappear pre-authorized in a future device picker.
+   * Falls back to a plain {@link disconnect} where `forget()` isn't
+   * supported (e.g. Chrome < 100).
+   */
+  async forget(): Promise<void> {
+    this.characteristic.removeEventListener("characteristicvaluechanged", this.onNotify);
+    this.parser.reset();
+    if (typeof this.device.forget === "function") {
+      await this.device.forget();
+    } else {
+      this.device.gatt?.disconnect();
+    }
+  }
 }
 
 /** Convenience helper: opens the device picker and connects in one step. */
